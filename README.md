@@ -87,10 +87,122 @@ También ayuda a tener una lógica más clara del sistema, muestra las validacio
 | `rating`    | Calificaciones               |
 
 ## Tabla de Endpoints
+| Endpoint | Método | Descripción | Autenticación | Ejemplo de cuerpo o respuesta |
+|-----------|---------|--------------|----------------|-------------------------------|
+| `/viajes/:id` | **DELETE** | Cancelación de viaje | Token de pasajero o conductor | `{"mensaje":"viaje cancelado exitosamente"}` |
+| `/usuarios/:id` | **DELETE** | Eliminación del pasajero | Token de pasajero o administrador | `{"mensaje":"cliente eliminado exitosamente"}` |
+| `/usuarios/:idconductor/calificacion` | **POST** | Calificación del conductor | Token de pasajero que tomó el viaje | `{calificacion:5,"comentario":"Carro limpio"}` |
+| `/usuarios?rol=conductor&placas=HJI890` | **GET** | Buscar conductor por placas | Token de administrador | `{"mensaje":"conductor encontrado correctamente"}` |
+| `/viajes/:id/asignar` | **PUT** | Tomar viaje (conductor) | Token de conductor | `{estado:"en progreso"}` |
+| `/pago/:idpago/pagar` | **POST** | Pago del viaje con tarjeta | Token de pasajero, saldo disponible | `{pago:12000, estado:"completado", medio:"tarjeta"}` |
+| `/usuarios` | **POST** | Creación de conductor | Público | `{nombre:"Juancho",documento:"12300",correo:"dada@gmail.com",contraseña:"12345",rol:"conductor",placas:"VDA-999"}` |
+| `/viajes?fecha=2025-03-01` | **GET** | Filtrar viajes por fecha | Token de usuario | `{"mensaje":"Viaje no encontrado"}` |
+| `/usuarios?rol=pasajero&calificacion_min=4&calificacion_max=5` | **GET** | Filtrar pasajeros por calificación | Token de admin o pasajero | `{"usuarios":[...]}` |
+| `/usuarios/:idconductor` | **DELETE** | Eliminar conductor | Token de admin o conductor | `{"mensaje":"Usuario eliminado correctamente"}` |
+| `/usuarios/:idconductor/vehiculo` | **PATCH** | Modificar vehículo del conductor | Token de conductor | `{placas:"ABC123",soat:"activo"}` |
+| `/auth/login` | **POST** | Ingreso de usuario | Público | `{email:"alo123@gmail.com",contraseña:"12345"}` |
+| `/usuarios/:idusuario/historial` | **GET** | Obtener historial de viajes | Token de usuario o admin | `{id:1234}` |
+| `/usuarios/:iduser/ubicacion` | **GET** | Obtener ubicación de usuario | Token de pasajero o conductor | `{id:1234}` |
+| `/viajes/:idviaje/mensaje` | **POST** | Enviar mensaje entre conductor y pasajero | Token de pasajero o conductor | `{mensaje:"Voy en camino",iduser:1234}` |
+| `/viajes/:idviaje/finalizar` | **PATCH** | Finalizar viaje | Token de conductor | `{estado:"finalizado"}` |
+| `/auth/register` | **POST** | Registro de nuevo usuario (pasajero) | Público | `{nombre:"Carlos",email:"carlos@mail.com",contraseña:"1234",rol:"pasajero"}` |
+| `/vehiculos` | **GET** | Listar vehículos registrados | Token de admin | `[{"placas":"XYZ-123","estado":"activo"}]` |
+| `/viajes/:id/reporte` | **POST** | Reportar incidente en el viaje | Token de pasajero o conductor | `{motivo:"Conductor llegó tarde",tipo:"retraso"}` |
+| `/usuarios/:id/notificaciones` | **GET** | Consultar notificaciones del usuario | Token de usuario | `[{"mensaje":"Tu viaje ha sido asignado"}]` |
+
 
 ## Flujos de uso
 
-## Desiciones de diseño y justificación
+
+A continuación se describen tres flujos de uso representativos de la interacción entre **cliente (pasajero o conductor)** y **servidor (API)**.
+
+---
+
+### 1. Solicitud, aceptación y finalización de un viaje
+
+**Objetivo:** Representar el ciclo completo desde la solicitud de un viaje hasta su finalización por parte del conductor.
+
+1. **Pasajero solicita un viaje**
+   - **Método:** `POST /viajes`
+   - **Body:** `{origen:"Calle 45 #10-23", destino:"Carrera 12 #30-18"}`
+   - **Respuesta:** `{"mensaje":"Viaje creado con éxito", "id_viaje":123}`
+   - **Auth:** Token del pasajero
+
+2. **Servidor busca un conductor disponible**
+   - Internamente consulta `/usuarios?rol=conductor&disponible=true`.
+   - Asigna automáticamente el viaje al conductor más cercano.
+
+3. **Conductor acepta el viaje**
+   - **Método:** `PUT /viajes/123/asignar`
+   - **Body:** `{estado:"en progreso"}`
+   - **Respuesta:** `{"mensaje":"Viaje aceptado, en progreso"}`
+   - **Auth:** Token del conductor
+
+4. **Durante el viaje**, el conductor y pasajero pueden intercambiar mensajes:
+   - **Método:** `POST /viajes/123/mensaje`
+   - **Body:** `{mensaje:"Estoy cerca de tu ubicación"}`
+   - **Auth:** Token de cualquiera de los dos usuarios
+
+5. **Finalización del viaje**
+   - **Método:** `PATCH /viajes/123/finalizar`
+   - **Body:** `{estado:"finalizado"}`
+   - **Respuesta:** `{"mensaje":"Viaje finalizado exitosamente"}`
+   - **Auth:** Token del conductor
+
+---
+
+### 2. Cancelación de viaje y devolución parcial
+
+**Objetivo:** Mostrar el proceso en el que un pasajero cancela un viaje y recibe un reembolso parcial.
+
+1. **Pasajero cancela el viaje**
+   - **Método:** `DELETE /viajes/123`
+   - **Auth:** Token del pasajero
+   - **Respuesta:** `{"mensaje":"viaje cancelado exitosamente"}`
+
+2. **Servidor calcula penalización o devolución**
+   - Lógica interna: Si el conductor ya se desplazaba, se descuenta un porcentaje.
+
+3. **Procesar devolución**
+   - **Método:** `POST /pago/321/reembolsar`
+   - **Body:** `{monto:6000, estado:"devuelto"}`
+   - **Auth:** Token del pasajero
+   - **Respuesta:** `{"mensaje":"Reembolso procesado con éxito"}`
+
+4. **Servidor actualiza historial de usuario**
+   - Se refleja en `/usuarios/:idusuario/historial` el estado del viaje cancelado y la devolución.
+
+---
+
+### 3. Calificación de conductor y pasajero
+
+**Objetivo:** Mostrar cómo se registran las calificaciones después de un viaje completado.
+
+1. **Pasajero califica al conductor**
+   - **Método:** `POST /usuarios/:idconductor/calificacion`
+   - **Body:** `{calificacion:5, comentario:"Excelente servicio"}`
+   - **Auth:** Token del pasajero
+   - **Respuesta:** `{"mensaje":"Calificación registrada correctamente"}`
+
+2. **Conductor califica al pasajero**
+   - **Método:** `POST /usuarios/:idpasajero/calificacion`
+   - **Body:** `{calificacion:4, comentario:"Buen pasajero"}`
+   - **Auth:** Token del conductor
+   - **Respuesta:** `{"mensaje":"Calificación del pasajero registrada"}`
+
+3. **Servidor actualiza promedio**
+   - Recalcula el puntaje promedio del usuario calificado y lo refleja en `/usuarios/:id`.
+
+4. **Administrador puede consultar estadísticas**
+   - **Método:** `GET /usuarios?rol=conductor&calificacion_min=4`
+   - **Auth:** Token de administrador
+   - **Respuesta:** `{"conductores_destacados":[...]}`
+
+---
+
+Cada flujo representa una interacción realista y coherente entre los actores del sistema, reflejando el comportamiento esperado en una plataforma de transporte tipo Uber.
+
+## Decisiones de diseño y justificación
 
 * Uso de API REST :
 
